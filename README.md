@@ -71,6 +71,5 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 - OpenStreetMap contributors for map data
 - ESRI for satellite imagery
 
-- 
 ### References:
 https://www.latlong.net/
