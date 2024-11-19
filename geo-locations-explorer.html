@@ -1,0 +1,319 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Town Maps Explorer - OpenStreetMap</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: Arial, sans-serif;
+            display: flex;
+            height: 100vh;
+        }
+
+        #sidebar {
+            width: 300px;
+            background-color: #f4f4f4;
+            padding: 20px;
+            box-shadow: 2px 0 5px rgba(0,0,0,0.1);
+            z-index: 1000;
+            overflow-y: auto;
+        }
+
+        #map {
+            flex: 1;
+            height: 100vh;
+            z-index: 1;
+        }
+
+        .town-item {
+            padding: 10px;
+            margin: 5px 0;
+            background-color: #fff;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .town-item:hover {
+            background-color: #e0e0e0;
+        }
+
+        .town-item.active {
+            background-color: #2b8a3e;
+            color: white;
+        }
+
+        .map-style-control {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: white;
+            padding: 10px;
+            border-radius: 5px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            z-index: 1000;
+        }
+
+        .add-location-form {
+            background-color: white;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }
+
+        .add-location-form input, 
+        .add-location-form textarea {
+            width: 100%;
+            padding: 8px;
+            margin: 5px 0;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+
+        .add-location-form button {
+            background-color: #2b8a3e;
+            color: white;
+            padding: 8px 15px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-top: 10px;
+        }
+
+        .add-location-form button:hover {
+            background-color: #237032;
+        }
+
+        .delete-btn {
+            background-color: #dc3545;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            padding: 4px 8px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+
+        .delete-btn:hover {
+            background-color: #c82333;
+        }
+
+        .custom-popup .leaflet-popup-content-wrapper {
+            background: #2c3e50;
+            color: #fff;
+            border-radius: 5px;
+        }
+
+        .custom-popup .leaflet-popup-tip {
+            background: #2c3e50;
+        }
+
+        .custom-popup .leaflet-popup-content {
+            margin: 15px;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div id="sidebar">
+        <h2>Add New Location</h2>
+        <div class="add-location-form">
+            <input type="text" id="locationName" placeholder="Location Name" required>
+            <input type="number" id="latitude" placeholder="Latitude" step="any" required>
+            <input type="number" id="longitude" placeholder="Longitude" step="any" required>
+            <textarea id="locationInfo" placeholder="Location Information" rows="3"></textarea>
+            <button onclick="addLocation()">Add Location</button>
+        </div>
+        <h2>Towns</h2>
+        <div id="town-list"></div>
+    </div>
+    <div id="map"></div>
+
+    <script>
+        let towns = [
+            { name: "New York", coordinates: [40.7128, -74.0060], info: "The Big Apple" },
+            { name: "Los Angeles", coordinates: [34.0522, -118.2437], info: "City of Angels" },
+            { name: "Chicago", coordinates: [41.8781, -87.6298], info: "The Windy City" },
+            { name: "Houston", coordinates: [29.7604, -95.3698], info: "Space City" },
+            { name: "Phoenix", coordinates: [33.4484, -112.0740], info: "Valley of the Sun" }
+        ];
+
+        // Initialize map
+        const map = L.map('map').setView([39.8283, -98.5795], 4);
+
+        // Add default OpenStreetMap layer
+        const osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19,
+            attribution: '© OpenStreetMap contributors'
+        }).addTo(map);
+
+        // Add satellite layer (ESRI)
+        const satelliteLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+            attribution: 'Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community'
+        });
+
+        // Add topographic layer
+        const topoLayer = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenTopoMap contributors'
+        });
+
+        // Create layer control
+        const styleControl = document.createElement('div');
+        styleControl.className = 'map-style-control';
+        const styleSelect = document.createElement('select');
+        const styles = {
+            'Street': osmLayer,
+            'Satellite': satelliteLayer,
+            'Topographic': topoLayer
+        };
+
+        for (const style in styles) {
+            const option = document.createElement('option');
+            option.value = style;
+            option.textContent = style;
+            styleSelect.appendChild(option);
+        }
+
+        styleSelect.onchange = (e) => {
+            const selectedStyle = styles[e.target.value];
+            map.eachLayer((layer) => {
+                if (layer instanceof L.TileLayer) {
+                    map.removeLayer(layer);
+                }
+            });
+            selectedStyle.addTo(map);
+        };
+
+        styleControl.appendChild(styleSelect);
+        document.body.appendChild(styleControl);
+
+        let currentMarker = null;
+
+        // Custom icon
+        const customIcon = L.icon({
+            iconUrl: 'data:image/svg+xml;base64,' + btoa(`
+                <svg width="25" height="41" viewBox="0 0 25 41" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M12.5 0C5.59644 0 0 5.59644 0 12.5C0 14.4276 0.40007 16.2563 1.11307 17.9198L12.5 41L23.8869 17.9198C24.5999 16.2563 25 14.4276 25 12.5C25 5.59644 19.4036 0 12.5 0Z" fill="#2b8a3e"/>
+                </svg>
+            `),
+            iconSize: [25, 41],
+            iconAnchor: [12, 41],
+            popupAnchor: [0, -41]
+        });
+
+        function showTownOnMap(town) {
+            // Remove active class from all items
+            document.querySelectorAll('.town-item').forEach(item => {
+                item.classList.remove('active');
+            });
+
+            // Add active class to clicked item
+            event.currentTarget.classList.add('active');
+
+            // Remove existing marker
+            if (currentMarker) {
+                map.removeLayer(currentMarker);
+            }
+
+            // Create new marker
+            currentMarker = L.marker(town.coordinates, {icon: customIcon})
+                .addTo(map)
+                .bindPopup(`
+                    <div>
+                        <h3>${town.name}</h3>
+                        <p>${town.info}</p>
+                    </div>
+                `, {
+                    className: 'custom-popup'
+                })
+                .openPopup();
+
+            // Pan to location with animation
+            map.setView(town.coordinates, 12, {
+                animate: true,
+                duration: 1
+            });
+        }
+
+        function deleteLocation(index) {
+            towns.splice(index, 1);
+            updateTownList();
+        }
+
+        function addLocation() {
+            const name = document.getElementById('locationName').value;
+            const lat = parseFloat(document.getElementById('latitude').value);
+            const lng = parseFloat(document.getElementById('longitude').value);
+            const info = document.getElementById('locationInfo').value;
+
+            if (!name || isNaN(lat) || isNaN(lng)) {
+                alert('Please fill in all required fields with valid values');
+                return;
+            }
+
+            const newTown = {
+                name: name,
+                coordinates: [lat, lng],
+                info: info || 'No information provided'
+            };
+
+            towns.push(newTown);
+            updateTownList();
+
+            // Clear form
+            document.getElementById('locationName').value = '';
+            document.getElementById('latitude').value = '';
+            document.getElementById('longitude').value = '';
+            document.getElementById('locationInfo').value = '';
+
+            // Show the new location on the map
+            showTownOnMap(newTown);
+        }
+
+        function updateTownList() {
+            const townList = document.getElementById('town-list');
+            townList.innerHTML = '';
+            towns.forEach((town, index) => {
+                const townElement = document.createElement('div');
+                townElement.className = 'town-item';
+                
+                const nameSpan = document.createElement('span');
+                nameSpan.textContent = town.name;
+                
+                const deleteButton = document.createElement('button');
+                deleteButton.className = 'delete-btn';
+                deleteButton.textContent = 'Delete';
+                deleteButton.onclick = (e) => {
+                    e.stopPropagation();
+                    deleteLocation(index);
+                };
+
+                townElement.appendChild(nameSpan);
+                townElement.appendChild(deleteButton);
+                townElement.addEventListener('click', () => showTownOnMap(town));
+                townList.appendChild(townElement);
+            });
+        }
+
+        // Add click event to map for getting coordinates
+        map.on('click', function(e) {
+            document.getElementById('latitude').value = e.latlng.lat.toFixed(6);
+            document.getElementById('longitude').value = e.latlng.lng.toFixed(6);
+        });
+
+        // Initial population of town list
+        updateTownList();
+
+        // Add scale control
+        L.control.scale().addTo(map);
+    </script>
+</body>
+</html>
